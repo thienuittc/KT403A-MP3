@@ -1,288 +1,171 @@
-
+from yolobit import *
 from machine import UART
-from utime   import sleep_ms
-from ustruct import unpack
-
-class KT403A :
-
-    # ============================================================================
-    # ===( Constants )============================================================
-    # ============================================================================
-
-    DEVICE_U_DISK = 1
-    DEVICE_SD     = 2
-    DEVICE_AUX    = 3
-    DEVICE_SLEEP  = 4
-    DEVICE_FLASH  = 5
-
-    EQ_NORMAL     = 0
-    EQ_POP        = 1
-    EQ_ROCK       = 2
-    EQ_JAZZ       = 3
-    EQ_CLASSIC    = 4
-    EQ_BASS       = 5
-
-    # ============================================================================
-    # ===( Constructor )==========================================================
-    # ============================================================================
-
-    def __init__( self,
-                  uartBus,
-                  txPinNum,
-                  rxPinNum,
-                  device    = None,
-                  volume    = 70,
-                  eq        = None ) :
-        txPinId = "P" + str(txPinNum)
-        rxPinId = "P" + str(rxPinNum)
-        self._uart = UART( uartBus,
-                           baudrate = 9600,
-                           bits     = 8,
-                           parity   = None,
-                           stop     = 1,
-                           pins     = (txPinId, rxPinId, None, None) )
-        self.SetDevice(device if device else KT403A.DEVICE_SD)
-        if not self.GetState() :
-            raise Exception('KT403A could not be initialized.')
-        self.SetVolume(volume)
-        self.SetEqualizer(eq if eq else KT403A.EQ_NORMAL)
-
-    # ============================================================================
-    # ===( Utils )================================================================
-    # ============================================================================
-
-    def _txCmd(self, cmd, dataL=0, dataH=0) :
-        self._uart.write(b'\x7E')        # Start
-        self._uart.write(b'\xFF')        # Firmware version
-        self._uart.write(b'\x06')        # Command length
-        self._uart.write(bytes([cmd]))   # Command word
-        self._uart.write(b'\x00')        # Feedback flag
-        self._uart.write(bytes([dataH])) # DataH
-        self._uart.write(bytes([dataL])) # DataL
-        self._uart.write(b'\xEF')        # Stop
-        sleep_ms(200 if cmd == 0x09 else 1000 if cmd == 0x0C else 30)
-
-    # ----------------------------------------------------------------------------
-
-    def _rxCmd(self) :
-        if self._uart.any() :
-            buf = self._uart.read(10)
-            if buf is not  None and \
-               len(buf) ==   10 and \
-               buf[0]   == 0x7E and \
-               buf[1]   == 0xFF and \
-               buf[2]   == 0x06 and \
-               buf[9]   == 0xEF     :
-               cmd  = buf[3]
-               data = unpack('>H', buf[5:7])[0]
-               return (cmd, data)
-        return None
-
-    # ----------------------------------------------------------------------------
-
-    def _readLastCmd(self) :
-        res = None
-        while True :
-            r = self._rxCmd()
-            if not r :
-                return res
-            res = r
-
-    # ============================================================================
-    # ===( Functions )============================================================
-    # ============================================================================
-
-    def PlayNext(self) :
-        self._txCmd(0x01)
-
-    # ----------------------------------------------------------------------------
-
-    def PlayPrevious(self) :
-        self._txCmd(0x02)
-
-    # ----------------------------------------------------------------------------
-
-    def PlaySpecific(self, trackIndex) :
-        self._txCmd(0x03, int(trackIndex%256), int(trackIndex/256))
-
-    # ----------------------------------------------------------------------------
-
-    def VolumeUp(self) :
-        self._txCmd(0x04)
-
-    # ----------------------------------------------------------------------------
-
-    def VolumeDown(self) :
-        self._txCmd(0x05)
-
-    # ----------------------------------------------------------------------------
-
-    def SetVolume(self, percent) :
-        if percent < 0 :
-            percent = 0
-        elif percent > 100 :
-            percent = 100
-        self._txCmd(0x06, int(percent*0x1E/100))
-
-    # ----------------------------------------------------------------------------
-
-    def SetEqualizer(self, eq) :
-        if eq < 0 or eq > 5 :
-            eq = 0
-        self._txCmd(0x07, eq)
-
-    # ----------------------------------------------------------------------------
-
-    def RepeatCurrent(self) :
-        self._txCmd(0x08)
-
-    # ----------------------------------------------------------------------------
-
-    def SetDevice(self, device) :
-        self._device = device
-        self._txCmd(0x09, device)
-
-    # ----------------------------------------------------------------------------
-
-    def SetLowPowerOn(self) :
-        self._txCmd(0x0A)
-
-    # ----------------------------------------------------------------------------
-
-    def SetLowPowerOff(self) :
-        self.SetDevice(self._device)
-
-    # ----------------------------------------------------------------------------
-
-    def ResetChip(self) :
-        self._txCmd(0x0C)
-
-    # ----------------------------------------------------------------------------
-
-    def Play(self) :
-        self._txCmd(0x0D)
-
-    # ----------------------------------------------------------------------------
-
-    def Pause(self) :
-        self._txCmd(0x0E)
-
-    # ----------------------------------------------------------------------------
-
-    def PlaySpecificInFolder(self, folderIndex, trackIndex) :
-        self._txCmd(0x0F, trackIndex, folderIndex)
-
-    # ----------------------------------------------------------------------------
-
-    def EnableLoopAll(self) :
-        self._txCmd(0x11, 1)
-
-    # ----------------------------------------------------------------------------
-
-    def DisableLoopAll(self) :
-        self._txCmd(0x11, 0)
-
-    # ----------------------------------------------------------------------------
-
-    def PlayFolder(self, folderIndex) :
-        self._txCmd(0x12, folderIndex)
-
-    # ----------------------------------------------------------------------------
-
-    def Stop(self) :
-        self._txCmd(0x16)
-
-    # ----------------------------------------------------------------------------
-
-    def LoopFolder(self, folderIndex) :
-        self._txCmd(0x17, folderIndex)
-
-    # ----------------------------------------------------------------------------
-
-    def RandomAll(self) :
-        self._txCmd(0x18)
-
-    # ----------------------------------------------------------------------------
-
-    def EnableLoop(self) :
-        self._txCmd(0x19, 0)
-
-    # ----------------------------------------------------------------------------
-
-    def DisableLoop(self) :
-        self._txCmd(0x19, 1)
-
-    # ----------------------------------------------------------------------------
-
-    def EnableDAC(self) :
-        self._txCmd(0x1A, 0)
-
-    # ----------------------------------------------------------------------------
-
-    def DisableDAC(self) :
-        self._txCmd(0x1A, 1)
-
-    # ----------------------------------------------------------------------------
-
-    def GetState(self) :
-        self._txCmd(0x42)
-        r = self._readLastCmd()
-        return r[1] if r and r[0] == 0x42 else None
-
-    # ----------------------------------------------------------------------------
-
-    def GetVolume(self) :
-        self._txCmd(0x43)
-        r = self._readLastCmd()
-        return int(r[1] / 0x1E *100) if r and r[0] == 0x43 else 0
-
-    # ----------------------------------------------------------------------------
-
-    def GetEqualizer(self) :
-        self._txCmd(0x44)
-        r = self._readLastCmd()
-        return r[1] if r and r[0] == 0x44 else 0
-
-    # ----------------------------------------------------------------------------
-
-    def GetFilesCount(self, device=None) :
-        if not device :
-            device = self._device
-        if device == KT403A.DEVICE_U_DISK :
-            self._txCmd(0x47)
-        elif device == KT403A.DEVICE_SD :
-            self._txCmd(0x48)
-        elif device == KT403A.DEVICE_FLASH :
-            self._txCmd(0x49)
-        else :
-            return 0
-        sleep_ms(200)
-        r = self._readLastCmd()
-        return r[1] if r and r[0] >= 0x47 and r[0] <= 0x49 else 0
-
-    # ----------------------------------------------------------------------------
-
-    def GetFolderFilesCount(self, folderIndex) :
-        self._txCmd(0x4E, folderIndex)
-        sleep_ms(200)
-        r = self._readLastCmd()
-        return r[1] if r and r[0] == 0x4E else 0
-
-    # ----------------------------------------------------------------------------
-
-    def IsStopped(self) :
-        return self.GetState() == 0x0200
-
-    # ----------------------------------------------------------------------------
-
-    def IsPlaying(self) :
-        return self.GetState() == 0x0201
-
-    # ----------------------------------------------------------------------------
-
-    def IsPaused(self) :
-        return self.GetState() == 0x0202
-
-    # ============================================================================
-    # ============================================================================
-    # ============================================================================
+from utime import sleep_ms, ticks_ms, ticks_diff
+
+Start_Byte = 0x7E
+Version_Byte = 0xFF
+Command_Length = 0x06
+Acknowledge = 0x00
+End_Byte = 0xEF
+
+# inherent delays in DFPlayer
+CONFIG_LATENCY = 1000
+PLAY_LATENCY =   500
+VOLUME_LATENCY = 500
+
+def clamp(x, minimum, maximum):
+    return max(minimum, min(x, maximum))
+
+def split(num):
+    return num >> 8, num & 0xFF
+
+def kill_time(stamp_ms, kill_ms):
+    diff_ms = ticks_diff(ticks_ms(), stamp_ms)
+    if diff_ms < kill_ms:
+        snooze_ms = kill_ms - diff_ms
+        sleep_ms(snooze_ms)
+        return snooze_ms
+    else:
+        return 0
+
+class SoundBit():
+    def __init__(self, uart=None, busy_pin=None, config=True, volume=0.5):
+        self._volume = None
+        if uart is None:
+            self.uart = UART(1, 9600) # UART on 
+            self.uart.init(9600, bits=8, parity=None, stop=1,tx=pin8.pin,rx=pin9.pin)
+        else:
+            self.uart = uart
+        if busy_pin is not None:
+            busy_pin.init(mode=Pin.IN, pull=Pin.PULL_UP)
+        self.busy_pin = busy_pin
+        if config:
+            self.config()
+        if volume is not None:
+            self.volume(volume)
+
+    def command(self, CMD, Par1, Par2):
+        self.awaitconfig()
+        Checksum = -(Version_Byte + Command_Length + CMD + Acknowledge + Par1 + Par2)
+        HighByte, LowByte = split(Checksum)
+        CommandLine = bytes([b & 0xFF for b in [
+            Start_Byte, Version_Byte, Command_Length, CMD, Acknowledge,
+            Par1, Par2, HighByte, LowByte, End_Byte
+        ]])
+        self.uart.write(CommandLine)
+
+    def config(self):
+        self.configtime = ticks_ms()
+        #self.reset()
+        self.command(0x3F, 0x00, 0x00)
+    def first_play(self):
+        self.command(0x3F, 0x00, 0x00)
+        sleep_ms(500)
+        self.command(0x06,0x00 ,0x15)
+        sleep_ms(500)
+        self.command(0x11, 0x00, 0x01)
+
+    def play(self):
+        self.awaitconfig()
+        self.playtime = ticks_ms()
+        self.command(0x0D, 0x00, 0x01)
+    def pause(self):
+        self.awaitconfig()
+        self.playtime = ticks_ms()
+        self.command(0x0E, 0x00, 0x00)
+    def playNext(self):
+        self.awaitconfig()
+        self.playtime = ticks_ms()
+        self.command(0x01, 0x00, 0x01)
+    def playPrevious(self):
+        self.awaitconfig()
+        self.playtime = ticks_ms()
+        self.command(0x02, 0x00, 0x01)
+    def class_mucsic(self,music):
+        self.awaitconfig()
+        self.playtime = ticks_ms()
+        self.command(0x07, 0x00, music)
+    def playback(self,mode):
+        self.awaitconfig()
+        self.playtime = ticks_ms()
+        self.command(0x08, 0x00, mode)
+    def finish(self, folderNum, trackNum):
+        self.play(folderNum, trackNum)
+        while self.playing():
+            sleep_ms(50)
+
+    def playing(self):
+        if self.busy_pin is not None:
+            self.awaitplay()
+            return self.busy_pin.value() == 0
+        else:
+            raise AssertionError("No busy pin provided, cannot detect play status")
+
+    def awaitconfig(self):
+        if self.configtime is not None:
+            kill_time(self.configtime, CONFIG_LATENCY)
+        self.configtime = None
+
+    def awaitplay(self):
+        if self.playtime is not None: # handle delay between playing and registering
+            kill_time(self.playtime, PLAY_LATENCY)
+        self.playtime = None
+
+    def awaitvolume(self):
+        if self.volumetime is not None: # handle delay between playing and registering
+            kill_time(self.volumetime, VOLUME_LATENCY)
+        self.volumetime = None
+
+    def repeat(self, repeat=True):
+        self.awaitconfig()
+        val = 1 if repeat else 0
+        self.command(0x11, 0, val)
+
+    def _gain(self, gain=1.0):
+        self.awaitconfig()
+        gain = float(clamp(gain, 0, 1.0))
+        val = int(30.0 * gain)
+        self.command(0x10,0 ,val)  
+
+    def volume(self, volume):
+        if volume < 0 :
+            volume = 0
+        elif volume > 100 :
+            volume = 100
+        self.awaitconfig()
+        self._volume = int(volume*0x1E/100)
+        val = self._volume
+        self.command(0x06,0x00 ,val)
+        self.volumetime = ticks_ms()
+
+    def standby(self):
+        self.awaitconfig()
+        self.command(0x0A, 0x00, 0x00)
+
+    def wake(self):
+        self.awaitconfig()
+        self.command(0x0B, 0x00, 0x00)
+
+    def reset(self):
+        self.awaitconfig()
+        self.command(0x0C, 0x00, 0x00)
+
+    def volumeUp(self) :
+        self.awaitconfig()
+        self.command(0x04, 0x00, 0x00)
+        self.volumetime = ticks_ms()
+    def volumeDown(self) :
+        self.awaitconfig()
+        self.command(0x05, 0x00, 0x00)
+        self.volumetime = ticks_ms()
+
+def main():
+    from time import sleep
+    player = Player(busy_pin=Pin(0))
+    player.volume(0.5)
+    player.awaitvolume()
+    for folder in range(0,3):
+        for track in range(0, 2):
+            player.play(folder, track)
+            while player.playing():
+                sleep(0.01)
